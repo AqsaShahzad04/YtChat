@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from rag import load_video, ask_question, sessions
+from rag import load_video, ask_question, sessions, get_transcript, extract_video_id
 
 # App Setup
 app = FastAPI(title="YtChat API")
@@ -17,8 +17,7 @@ app.add_middleware(
 
 # Request Models
 class LoadRequest(BaseModel):
-    video_id: str
-    transcript: str
+    video_url: str  # Accept full URL now, extract ID internally
 
 
 class ChatRequest(BaseModel):
@@ -35,25 +34,30 @@ def root():
 
 @app.post("/api/load")
 def load(req: LoadRequest):
-    """Load a YouTube video and build its RAG pipeline."""
+    """Fetch transcript and load video into RAG pipeline in one shot."""
     try:
-        vid, message = load_video(req.video_id, req.transcript)
-        return {
-            "video_id": vid,
-            "title": message,
-            "status": "ready"
-        }
-    except Exception as e:
+        video_id = extract_video_id(req.video_url)
+
+        # Skip re-loading if already in session
+        if video_id in sessions:
+            return {"video_id": video_id, "status": "ready", "message": "Already loaded"}
+
+        transcript = get_transcript(video_id)
+        load_video(video_id, transcript)
+
+        return {"video_id": video_id, "status": "ready", "message": "Video loaded successfully"}
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/chat")
 def chat(req: ChatRequest):
     """Ask a question about an already-loaded video."""
-    # Check if video is loaded
     if req.video_id not in sessions:
         raise HTTPException(status_code=404, detail="Video not loaded. Call /api/load first.")
-    
+
     try:
         answer = ask_question(req.video_id, req.question)
         return {"answer": answer}

@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Moon, Sun, Play, MessageSquare, Zap, Loader2, ArrowRight } from 'lucide-react';
-import { extractVideoId, getTranscriptText } from '../utils/youtube';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 
@@ -31,15 +30,12 @@ const LandingPage = () => {
         setError('');
 
         try {
-            const videoId = extractVideoId(url);
-            const transcript = await getTranscriptText(videoId);
-
             const res = await fetch(`${BACKEND_URL}/api/load`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ video_id: videoId, transcript }),
+                body: JSON.stringify({ video_url: url }),
             });
 
             if (!res.ok) {
@@ -47,7 +43,9 @@ const LandingPage = () => {
                 throw new Error(data.detail || 'Failed to initialize chat');
             }
 
-            navigate(`/chat?v=${videoId}`);
+            const data = await res.json();
+            navigate(`/chat?v=${data.video_id}`);
+
         } catch (err: any) {
             setError(err.message || 'Something went wrong');
         } finally {
@@ -57,7 +55,6 @@ const LandingPage = () => {
 
     return (
         <div className={`min-h-screen flex flex-col font-inter transition-colors duration-300 ${isDarkMode ? 'bg-[#0a0a0a] text-white' : 'bg-white text-[#111111]'}`}>
-            {/* Header */}
             <header className="w-full flex justify-between items-center py-6 px-8 md:px-12 max-w-7xl mx-auto">
                 <div className="font-bold text-xl tracking-tight">YtChat</div>
                 <button
@@ -68,26 +65,21 @@ const LandingPage = () => {
                 </button>
             </header>
 
-            {/* Main Content */}
             <main className="flex-1 flex flex-col items-center justify-center px-4 w-full max-w-3xl mx-auto text-center mt-12 md:mt-0">
 
-                {/* Badge */}
                 <div className={`flex items-center space-x-2 border shadow-sm px-4 py-1.5 rounded-full mb-8 ${isDarkMode ? 'border-gray-800 bg-[#111] text-gray-400' : 'border-gray-200 bg-white text-gray-500'}`}>
                     <span className="w-2 h-2 rounded-full bg-gray-400"></span>
                     <span className="text-xs font-medium">AI-powered video understanding</span>
                 </div>
 
-                {/* Hero Title */}
                 <h1 className="text-5xl md:text-6xl font-bold tracking-tight leading-tight mb-6">
                     Chat with any<br />YouTube video
                 </h1>
 
-                {/* Description */}
                 <p className={`text-sm md:text-base mb-10 max-w-lg mx-auto ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                     Paste a link, ask questions, get instant answers. No<br className="hidden md:block" /> more scrubbing through hours of content.
                 </p>
 
-                {/* Input Form */}
                 <div className="w-full max-w-2xl relative">
                     <form
                         onSubmit={handleSubmit}
@@ -110,7 +102,7 @@ const LandingPage = () => {
                             {loading ? (
                                 <>
                                     <Loader2 className="animate-spin" size={16} />
-                                    <span>...</span>
+                                    <span>Fetching transcript...</span>
                                 </>
                             ) : (
                                 <>
@@ -133,7 +125,6 @@ const LandingPage = () => {
                     <span>No sign-up required</span>
                 </div>
 
-                {/* Features Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-left mt-24 mb-16 w-full max-w-4xl mx-auto px-4">
                     <div className="space-y-4">
                         <div className={`w-10 h-10 rounded-lg flex items-center justify-center border ${isDarkMode ? 'bg-gray-900 border-gray-800 text-gray-300' : 'bg-gray-50 border-gray-100 text-gray-700'}`}>
@@ -167,7 +158,6 @@ const LandingPage = () => {
                 </div>
             </main>
 
-            {/* Footer */}
             <footer className={`w-full text-center py-8 text-xs border-t mt-auto transition-colors ${isDarkMode ? 'text-gray-500 border-gray-900' : 'text-gray-400 border-gray-50'}`}>
                 <span className="mr-2">Built with YtChat</span>
                 <span>© 2026</span>

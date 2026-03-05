@@ -1,4 +1,6 @@
 import os
+import re
+from youtube_transcript_api import YouTubeTranscriptApi
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import FastEmbedEmbeddings
@@ -15,7 +17,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 # Sessions store - cache for loaded videos
 sessions = {}
 
-# Embedding model - converts text to vectors (fastembed is lightweight)
+# Embedding model
 embeddings = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
 
 # LLM - Groq with llama model
@@ -25,10 +27,9 @@ llm = ChatGroq(
     temperature=0.5
 )
 
-# Prompt template for question answering
+# Prompt template
 prompt = ChatPromptTemplate.from_messages([
     ("system", """You are YtChat, a helpful assistant that answers questions strictly based on a YouTube video's transcript.
-
 RULES:
 - Answer ONLY from the context provided. Never use outside knowledge.
 - If the answer isn't in the context, say: "I couldn't find that in the video."
@@ -37,57 +38,53 @@ RULES:
 - Use **bold** for important terms or key takeaways.
 - If quoting the video directly, use "quotes".
 - Don't say "based on the context" or "the transcript says" — just answer naturally.
-
 Context:
 {context}"""),
     ("human", "{input}")
 ])
 
+def extract_video_id(url: str) -> str:
+    pattern1 = r"(?:v=|\/)([0-9A-Za-z_-]{11})"
+    pattern2 = r"youtu\.be\/([0-9A-Za-z_-]{11})"
+    for pattern in [pattern1, pattern2]:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    raise ValueError("Invalid YouTube URL. Could not extract video ID.")
 
-def load_video(video_id: str, transcript: str) -> tuple:
-    """Full RAG pipeline - takes video_id and transcript, builds a queryable chain, stores it in sessions."""
-    
-    # Step 1: Check if already loaded
+def get_transcript(video_id: str) -> str:
+    try:
+        ytt_api = YouTubeTranscriptApi()
+        transcript_list = ytt_api.list(video_id)
+        
+        # Pick first available transcript (any language)
+        transcript = transcript_list.find_transcript(
+            [t.language_code for t in transcript_list]
+        )
+        fetched = transcript.fetch()
+        return " ".join([entry.text for entry in fetched])
+    except Exception as e:
+        raise ValueError(f"Could not fetch transcript: {str(e)}")
+
+def format_docs(docs):
+    return "\n\n".join(doc.page_content for doc in docs)
+
+def load_video(video_id: str, transcript: str) -> str:
     if video_id in sessions:
-        return (video_id, "Already loaded")
-    
-    # Step 2: Split transcript into chunks
+        return "Already loaded"
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
     chunks = text_splitter.create_documents([transcript])
-    
-    # Step 3: Create vector store with FAISS
     vectorstore = FAISS.from_documents(chunks, embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
-    
-    # Step 4: Create chain using LCEL (LangChain Expression Language)
-    # This replaces the deprecated create_retrieval_chain and create_stuff_documents_chain
-    
-    # First, create a function to format documents
-    def format_docs(docs):
-        return "\n\n".join(doc.page_content for doc in docs)
-    
-    # Build the chain: retrieve docs -> format -> prompt -> llm -> parse output
     chain = (
         {"context": retriever | format_docs, "input": RunnablePassthrough()}
         | prompt
         | llm
         | StrOutputParser()
     )
-    
-    # Step 5: Store in sessions
     sessions[video_id] = chain
-    
-    # Step 6: Return success message
-    return (video_id, "Video loaded successfully")
-
+    return "Video loaded successfully"
 
 def ask_question(video_id: str, question: str) -> str:
-    """Ask a question about an already-loaded video."""
-    # Step 1: Get chain from sessions
     chain = sessions[video_id]
-    
-    # Step 2: Invoke chain (LCEL returns the string directly now)
-    answer = chain.invoke(question)
-    
-    # Step 3: Return answer
-    return answer
+    return chain.invoke(question)
